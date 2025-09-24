@@ -9,9 +9,9 @@ exports.findPath = (req, res) => {
         // 입력 검증
         if (!pathObject.grid || !Array.isArray(pathObject.grid)) {
             return res.status(400).json(funcCmmn.getReturnMessage({
+                isErr: true,
                 resultData: null,
-                resultCnt: 0,
-                errorMsg: "Invalid grid data"
+                message: "Invalid grid data"
             }));
         }
 
@@ -34,18 +34,18 @@ exports.findPath = (req, res) => {
         // 좌표 유효성 검사
         if (startX < 0 || startX >= gridWidth || startY < 0 || startY >= gridHeight || endX < 0 || endX >= gridWidth || endY < 0 || endY >= gridHeight) {
             return res.status(400).json(funcCmmn.getReturnMessage({
+                isErr: true,
                 resultData: null,
-                resultCnt: 0,
-                errorMsg: "Invalid coordinates"
+                message: "Invalid coordinates"
             }));
         }
 
         // 시작점과 목표점이 장애물인지 확인
         if (pathObject.grid[startY][startX] === 1 || pathObject.grid[endY][endX] === 1) {
             return res.status(400).json(funcCmmn.getReturnMessage({
+                isErr: true,
                 resultData: null,
-                resultCnt: 0,
-                errorMsg: "Start or end point is blocked"
+                message: "시작점이나 목표점이 장애물입니다."
             }));
         }
 
@@ -75,9 +75,9 @@ exports.findPath = (req, res) => {
     } catch (error) {
         console.error('Pathfinding error:', error);
         res.status(500).json(funcCmmn.getReturnMessage({
+            isErr: true,
             resultData: null,
-            resultCnt: 0,
-            errorMsg: "Internal server error"
+            message: "Internal server error"
         }));
     }
 };
