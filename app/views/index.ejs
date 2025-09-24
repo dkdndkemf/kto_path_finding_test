@@ -15,14 +15,14 @@
     const imgElem = new Image();
     imgElem.src = '../public/images/testMapImg.png';
 
-    const gridSize = 20; // 격자 한 칸 길이
+    const gridSize = 10; // 격자 한 칸 길이
 
     const obstacleRects = [
-        // {x1: 100, y1: 50, x2: 200, y2: 150},
-        // {x1: 250, y1: 200, x2: 350, y2: 300},
-        // {x1: 500, y1: 500, x2: 1000, y2: 1000},
-        // {x1: 1200, y1: 500, x2: 1300, y2: 1000},
-        // {x1: 1700, y1: 700, x2: 2500, y2: 900},
+        {x1: 100, y1: 50, x2: 200, y2: 150},
+        {x1: 250, y1: 200, x2: 350, y2: 300},
+        {x1: 500, y1: 500, x2: 1000, y2: 1000},
+        {x1: 1200, y1: 500, x2: 1300, y2: 1000},
+        {x1: 1700, y1: 700, x2: 2500, y2: 900},
         {x1: 1500, y1: 100, x2: 1500, y2: 1900},
     ];
 
@@ -75,12 +75,11 @@
                 startY: start.row,
                 endX: end.col,
                 endY: end.row,
-                width: cols,
-                height: rows,
+                gridWidth: cols,
+                gridHeight: rows,
                 grid: grid
             };
-
-            const response = await fetch('/api/pathfinding', {
+            const response = await fetch('/path/findPath', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -93,11 +92,11 @@
             }
 
             const result = await response.json();
-
-            if (result.success && result.path) {
-                console.log(`경로 찾기 성공! 경로 길이: ${result.path.length}`);
-                console.log(`알고리즘: ${result.algorithm || 'Unknown'}`);
-                console.log(`실행 시간: ${result.executionTime || 'N/A'}ms`);
+            const resultData = result.resultData;
+            if (resultData.success && resultData.path) {
+                console.log(`경로 찾기 성공! 경로 길이: ${resultData.path.length}`);
+                console.log(`알고리즘: ${resultData.algorithm || 'Unknown'}`);
+                console.log(`실행 시간: ${resultData.executionTime || 'N/A'}ms`);
 
                 // 경로 그리기
                 drawGrid();
@@ -105,27 +104,37 @@
                 drawCell(end.row, end.col, 'red');
 
                 // 경로를 파란색으로 표시
-                result.path.forEach(point => {
-                    if (point.length === 2) {
-                        // [x, y] 형태
-                        const [x, y] = point;
-                        if (!(y === start.row && x === start.col) &&
-                            !(y === end.row && x === end.col)) {
-                            drawCell(y, x, 'lightblue');
-                        }
+                ctx.beginPath();
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 2;
+
+                let first = true;
+                resultData.path.forEach(point => {
+                    let x, y;
+                    if (Array.isArray(point) && point.length === 2) {
+                        [x, y] = point;
                     } else if (point.x !== undefined && point.y !== undefined) {
-                        // {x, y} 형태
-                        if (!(point.y === start.row && point.x === start.col) &&
-                            !(point.y === end.row && point.x === end.col)) {
-                            drawCell(point.y, point.x, 'lightblue');
-                        }
+                        x = point.x;
+                        y = point.y;
+                    }
+
+                    const pixelX = offsetX + x * gridSize + gridSize / 2;
+                    const pixelY = offsetY + y * gridSize + gridSize / 2;
+
+                    if (first) {
+                        ctx.moveTo(pixelX, pixelY);
+                        first = false;
+                    } else {
+                        ctx.lineTo(pixelX, pixelY);
                     }
                 });
 
+                ctx.stroke();
+
                 // 점프 포인트가 있다면 표시 (JPS의 경우)
-                if (result.jumpPoints && result.jumpPoints.length > 0) {
-                    console.log(`점프 포인트 수: ${result.jumpPoints.length}`);
-                    drawJumpPoints(result.jumpPoints);
+                if (resultData.jumpPoints && resultData.jumpPoints.length > 0) {
+                    console.log(`점프 포인트 수: ${resultData.jumpPoints.length}`);
+                    drawJumpPoints(resultData.jumpPoints);
                 }
 
             } else {
