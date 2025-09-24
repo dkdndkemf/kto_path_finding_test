@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title><%= title %></title>
+    <link rel='stylesheet' href='/stylesheets/style.css'/>
+</head>
+<body>
+<canvas id="canvas" width="3000" height="2000"></canvas>
+</body>
+</html>
+<script>
+    const canvas = document.querySelector("#canvas");
+    const ctx = canvas.getContext("2d");
+
+    const imgElem = new Image();
+    imgElem.src = '../public/images/testMapImg.png';
+
+    const gridSize = 20; // 격자 한 칸 길이
+
+    const obstacleRects = [
+        // {x1: 100, y1: 50, x2: 200, y2: 150},
+        // {x1: 250, y1: 200, x2: 350, y2: 300},
+        // {x1: 500, y1: 500, x2: 1000, y2: 1000},
+        // {x1: 1200, y1: 500, x2: 1300, y2: 1000},
+        // {x1: 1700, y1: 700, x2: 2500, y2: 900},
+        {x1: 1500, y1: 100, x2: 1500, y2: 1900},
+    ];
+
+    let start = null;
+    let end = null;
+    let offsetX, offsetY, drawWidth, drawHeight, rows, cols;
+    let obstacleCells = [];
+    let grid = []; // 2D 그리드 (0: 통행가능, 1: 장애물)
+
+    // 클릭 이벤트
+    canvas.addEventListener('click', async (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const col = Math.floor((mouseX - offsetX) / gridSize);
+        const row = Math.floor((mouseY - offsetY) / gridSize);
+
+        if (row < 0 || row >= rows || col < 0 || col >= cols) return;
+
+        if (!start) {
+            start = {row, col};
+            drawGrid();
+            drawCell(start.row, start.col, 'green');
+        } else if (!end) {
+            end = {row, col};
+            drawGrid();
+            drawCell(start.row, start.col, 'green');
+            drawCell(end.row, end.col, 'red');
+
+            // 서버에 패스파인딩 요청
+            await requestPathfinding();
+        } else {
+            start = {row, col};
+            end = null;
+            drawGrid();
+            drawCell(start.row, start.col, 'green');
+        }
+    });
+
+    // 서버에 패스파인딩 요청
+    async function requestPathfinding() {
+        try {
+            console.log('패스파인딩 요청 중...');
+            console.log(`시작: (${start.row}, ${start.col}), 목표: (${end.row}, ${end.col})`);
+            console.log(`그리드 크기: ${rows} x ${cols}`);
+
+            const requestData = {
+                startX: start.col,
+                startY: start.row,
+                endX: end.col,
+                endY: end.row,
+                width: cols,
+                height: rows,
+                grid: grid
+            };
+
+            const response = await fetch('/api/pathfinding', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+
+            if (result.success && result.path) {
+                console.log(`경로 찾기 성공! 경로 길이: ${result.path.length}`);
+                console.log(`알고리즘: ${result.algorithm || 'Unknown'}`);
+                console.log(`실행 시간: ${result.executionTime || 'N/A'}ms`);
+
+                // 경로 그리기
+                drawGrid();
+                drawCell(start.row, start.col, 'green');
+                drawCell(end.row, end.col, 'red');
+
+                // 경로를 파란색으로 표시
+                result.path.forEach(point => {
+                    if (point.length === 2) {
+                        // [x, y] 형태
+                        const [x, y] = point;
+                        if (!(y === start.row && x === start.col) &&
+                            !(y === end.row && x === end.col)) {
+                            drawCell(y, x, 'lightblue');
+                        }
+                    } else if (point.x !== undefined && point.y !== undefined) {
+                        // {x, y} 형태
+                        if (!(point.y === start.row && point.x === start.col) &&
+                            !(point.y === end.row && point.x === end.col)) {
+                            drawCell(point.y, point.x, 'lightblue');
+                        }
+                    }
+                });
+
+                // 점프 포인트가 있다면 표시 (JPS의 경우)
+                if (result.jumpPoints && result.jumpPoints.length > 0) {
+                    console.log(`점프 포인트 수: ${result.jumpPoints.length}`);
+                    drawJumpPoints(result.jumpPoints);
+                }
+
+            } else {
+                console.log('경로를 찾을 수 없습니다.');
+                alert('경로를 찾을 수 없습니다.');
+            }
+
+        } catch (error) {
+            console.error('패스파인딩 요청 실패:', error);
+            alert('서버 통신 오류가 발생했습니다.');
+        }
+    }
+
+    // 이미지 로드 후 초기화
+    imgElem.addEventListener('load', () => {
+        const canvasWidth = canvas.width;
+        const canvasHeight = canvas.height;
+        const scale = Math.min(canvasWidth / imgElem.width, canvasHeight / imgElem.height);
+
+        drawWidth = imgElem.width * scale;
+        drawHeight = imgElem.height * scale;
+        offsetX = (canvasWidth - drawWidth) / 2;
+        offsetY = (canvasHeight - drawHeight) / 2;
+
+        cols = Math.floor(drawWidth / gridSize);
+        rows = Math.floor(drawHeight / gridSize);
+
+        // 2D 그리드 초기화 (0: 통행가능, 1: 장애물)
+        grid = Array(rows).fill(null).map(() => Array(cols).fill(0));
+        obstacleCells = [];
+
+        // 픽셀 → 격자 좌표 변환 및 그리드 설정
+        obstacleRects.forEach(rect => {
+            const startCol = Math.floor((rect.x1 - offsetX) / gridSize);
+            const endCol = Math.floor((rect.x2 - offsetX) / gridSize);
+            const startRow = Math.floor((rect.y1 - offsetY) / gridSize);
+            const endRow = Math.floor((rect.y2 - offsetY) / gridSize);
+
+            for (let r = startRow; r <= endRow; r++) {
+                for (let c = startCol; c <= endCol; c++) {
+                    if (r >= 0 && r < rows && c >= 0 && c < cols) {
+                        grid[r][c] = 1; // 장애물 표시
+                        obstacleCells.push({row: r, col: c});
+                    }
+                }
+            }
+        });
+
+        console.log(`그리드 초기화 완료: ${rows} x ${cols}`);
+        console.log(`장애물 개수: ${obstacleCells.length}`);
+        drawGrid();
+    });
+
+    // 격자 그리기
+    function drawGrid() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(imgElem, offsetX, offsetY, drawWidth, drawHeight);
+
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 1;
+
+        for (let i = 0; i <= rows; i++) {
+            const y = offsetY + i * gridSize;
+            ctx.beginPath();
+            ctx.moveTo(offsetX, y);
+            ctx.lineTo(offsetX + cols * gridSize, y);
+            ctx.stroke();
+        }
+        for (let j = 0; j <= cols; j++) {
+            const x = offsetX + j * gridSize;
+            ctx.beginPath();
+            ctx.moveTo(x, offsetY);
+            ctx.lineTo(x, offsetY + rows * gridSize);
+            ctx.stroke();
+        }
+
+        // 장애물 표시
+        obstacleCells.forEach(o => drawCell(o.row, o.col, 'black'));
+    }
+
+    // 셀 색칠
+    function drawCell(row, col, color) {
+        ctx.fillStyle = color;
+        ctx.fillRect(offsetX + col * gridSize + 1, offsetY + row * gridSize + 1, gridSize - 2, gridSize - 2);
+    }
+
+    // 점프 포인트 그리기 (JPS 전용)
+    function drawJumpPoints(jumpPoints) {
+        jumpPoints.forEach(jp => {
+            let row, col;
+
+            // 다양한 형태의 점프 포인트 데이터 처리
+            if (Array.isArray(jp) && jp.length === 2) {
+                [col, row] = jp; // [x, y] 형태
+            } else if (jp.x !== undefined && jp.y !== undefined) {
+                col = jp.x;
+                row = jp.y;
+            } else if (jp.row !== undefined && jp.col !== undefined) {
+                row = jp.row;
+                col = jp.col;
+            } else {
+                return; // 잘못된 형태
+            }
+
+            // 주황색 배경
+            drawCell(row, col, 'orange');
+
+            // 가운데에 'J' 표시
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            const x = offsetX + col * gridSize + gridSize / 2;
+            const y = offsetY + row * gridSize + gridSize / 2;
+            ctx.fillText('J', x, y);
+        });
+    }
+
+    // 디버깅을 위한 그리드 출력
+    function printGridInfo() {
+        console.log('=== 그리드 정보 ===');
+        console.log(`크기: ${rows} x ${cols}`);
+        console.log(`장애물 셀 수: ${obstacleCells.length}`);
+
+        // 첫 5줄만 출력 (디버깅용)
+        console.log('그리드 미리보기 (첫 5행):');
+        for (let i = 0; i < Math.min(5, rows); i++) {
+            console.log(`행 ${i}:`, grid[i].slice(0, Math.min(20, cols)).join(''));
+        }
+    }
+
+    // 개발자 도구에서 호출할 수 있는 디버깅 함수들
+    window.debugGrid = printGridInfo;
+    window.getGrid = () => grid;
+    window.getObstacles = () => obstacleCells;
+</script>
